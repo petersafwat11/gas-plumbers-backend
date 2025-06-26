@@ -42,6 +42,7 @@ apiRouter.use(
   cors({
     origin: [
       "http://localhost:3000",
+      "http://localhost:3001",
       "https://labbe.vercel.app",
     ],
     methods: ["GET", "POST", "PATCH", "DELETE"],
