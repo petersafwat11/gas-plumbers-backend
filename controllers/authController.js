@@ -1,9 +1,7 @@
 const crypto = require("crypto");
 const { promisify } = require("util");
 const jwt = require("jsonwebtoken");
-const Host = require("../models/HostModel");
-const Vendor = require("../models/VendorModel");
-const WhiteLabel = require("../models/WhiteLabelModel");
+const User = require("../models/UserModel");
 const OTP = require("../models/OTPModel");
 const catchAsync = require("../utils/catchAsync");
 const AppError = require("../utils/appError");
@@ -18,7 +16,7 @@ const signToken = (id) =>
     expiresIn: process.env.JWT_EXPIRES_IN,
   });
 
-const createSendToken = (user, statusCode, res, userType) => {
+const createSendToken = (user, statusCode, res) => {
   const token = signToken(user._id);
   const cookieOptions = {
     expires: new Date(
@@ -36,333 +34,40 @@ const createSendToken = (user, statusCode, res, userType) => {
   res.status(statusCode).json({
     status: "success",
     token,
-    userType,
-    data: {
-      user,
-    },
+    user,
   });
 };
-
-// Generate 6-digit OTP
-const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-};
-
-// Send SMS function (placeholder - you'll need to implement with your SMS provider)
-const sendSMS = async (phoneNumber, message) => {
-  // TODO: Implement SMS sending with your preferred SMS service
-  // For now, just log the OTP (remove this in production)
-  console.log(`SMS to ${phoneNumber}: ${message}`);
-  return true;
-};
-
 // SIGNUP CONTROLLERS
-exports.signupHost = async (req, res) => {
+exports.signupUser = async (req, res) => {
   try {
-    const { phoneNumber } = req.body;
+    const { email } = req.body;
 
-    if (!phoneNumber) {
+    if (!email) {
       return res.status(400).json({
         status: "fail",
-        message: "Phone number is required",
+        message: "Email is required",
       });
     }
 
     // Check if host already exists
-    const existingHost = await Host.findOne({ phoneNumber });
+    const existingUser = await User.findOne({ email });
 
-    if (existingHost) {
+    if (existingUser) {
       return res.status(400).json({
         status: "fail",
-        message: "Host with this phone number already exists",
+        message: "User with this email already exists",
       });
     }
 
-    // Create new host with minimal data
-    const newHost = await Host.create({
-      phoneNumber,
-      profileCompleted: false, // Track if profile is completed
+    // Create new user with minimal data
+    const newUser = await User.create({
+      ...req.body,
     });
 
-    // Send token and minimal host details
-    createSendToken(newHost, 201, res, "host");
+    // Send token and minimal user details
+    createSendToken(newUser, 201, res);
   } catch (err) {
-    console.error("Host signup error:", err);
-    res.status(400).json({
-      status: "fail",
-      message: err.message,
-    });
-  }
-};
-
-// Complete host profile
-exports.completeHostProfile = async (req, res) => {
-  try {
-    let { username, email, password, passwordConfirm } = req.body;
-
-    if (!username || !email || !password || !passwordConfirm) {
-      return res.status(400).json({
-        status: "fail",
-        message:
-          "All fields are required: username, email, password, passwordConfirm",
-      });
-    }
-
-    // Trim whitespace from username
-    username = username.trim();
-
-    // Validate passwords match
-    if (password !== passwordConfirm) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Passwords do not match",
-      });
-    }
-
-    // Check if email or username already exists (excluding current user)
-    const existingHost = await Host.findOne({
-      $and: [
-        { _id: { $ne: req.user._id } },
-        { $or: [{ email }, { username }] },
-      ],
-    });
-
-    if (existingHost) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Email or username already exists",
-      });
-    }
-
-    // Get the current user and update fields manually
-    const hostToUpdate = await Host.findById(req.user._id);
-
-    if (!hostToUpdate) {
-      return res.status(404).json({
-        status: "fail",
-        message: "Host not found",
-      });
-    }
-
-    // Update fields
-    hostToUpdate.username = username;
-    hostToUpdate.email = email;
-    hostToUpdate.password = password;
-    hostToUpdate.passwordConfirm = passwordConfirm;
-    hostToUpdate.profileCompleted = true;
-
-    // Save the updated host (this will trigger pre-save middleware for password hashing)
-    const updatedHost = await hostToUpdate.save();
-
-    // Send new token with updated host details
-    createSendToken(updatedHost, 200, res, "host");
-  } catch (err) {
-    console.error("Complete host profile error:", err);
-    res.status(400).json({
-      status: "fail",
-      message: err.message,
-    });
-  }
-};
-
-exports.signupVendor = async (req, res) => {
-  try {
-    console.log("Vendor signup request body:", req.body);
-    console.log("Uploaded files:", req.files);
-
-    // Parse form data (JSON strings from FormData)
-    const {
-      identity,
-      serviceData,
-      samplesAndPackages,
-      commercialVerification,
-      paymentData,
-      otherLinksAndData,
-    } = req.body;
-
-    // Parse JSON strings if they come as strings (from FormData)
-    const parsedIdentity =
-      typeof identity === "string" ? JSON.parse(identity) : identity;
-    const parsedServiceData =
-      typeof serviceData === "string" ? JSON.parse(serviceData) : serviceData;
-    const parsedSamplesAndPackages =
-      typeof samplesAndPackages === "string"
-        ? JSON.parse(samplesAndPackages)
-        : samplesAndPackages;
-    const parsedCommercialVerification =
-      typeof commercialVerification === "string"
-        ? JSON.parse(commercialVerification)
-        : commercialVerification;
-    const parsedPaymentData =
-      typeof paymentData === "string" ? JSON.parse(paymentData) : paymentData;
-    const parsedOtherLinksAndData =
-      typeof otherLinksAndData === "string"
-        ? JSON.parse(otherLinksAndData)
-        : otherLinksAndData;
-
-    // Validate password fields
-    if (!parsedIdentity.password || !parsedIdentity.passwordConfirm) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Password and password confirmation are required",
-      });
-    }
-
-    if (parsedIdentity.password !== parsedIdentity.passwordConfirm) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Passwords do not match",
-      });
-    }
-
-    // Process uploaded files
-    const uploadedFiles = processVendorFiles(req.files);
-
-    // Merge file paths with parsed data
-    if (uploadedFiles.portfolioImages) {
-      parsedSamplesAndPackages.portfolioImages = uploadedFiles.portfolioImages;
-    }
-    if (uploadedFiles.businessLogo) {
-      parsedSamplesAndPackages.businessLogo = uploadedFiles.businessLogo;
-    }
-    if (uploadedFiles.pricePackages) {
-      parsedSamplesAndPackages.pricePackages = uploadedFiles.pricePackages;
-    }
-    if (uploadedFiles.commercialRecord) {
-      parsedCommercialVerification.commercialRecord =
-        uploadedFiles.commercialRecord;
-    }
-    if (uploadedFiles.cv) {
-      parsedOtherLinksAndData.cv = uploadedFiles.cv;
-    }
-    if (uploadedFiles.profileFile) {
-      parsedOtherLinksAndData.profileFile = uploadedFiles.profileFile;
-    }
-
-    // Check if vendor already exists
-    const existingVendor = await Vendor.findOne({
-      $or: [
-        { "identity.email": parsedIdentity.email },
-        { "identity.phoneNumber": parsedIdentity.phoneNumber },
-      ],
-    });
-
-    if (existingVendor) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Vendor with this email or phone number already exists",
-      });
-    }
-
-    // Create new vendor
-    const newVendor = await Vendor.create({
-      identity: parsedIdentity,
-      serviceData: parsedServiceData,
-      samplesAndPackages: parsedSamplesAndPackages,
-      commercialVerification: parsedCommercialVerification,
-      paymentData: parsedPaymentData,
-      otherLinksAndData: parsedOtherLinksAndData,
-      password: parsedIdentity.password,
-      passwordConfirm: parsedIdentity.passwordConfirm,
-    });
-
-    // Just send success message for vendor signup
-    res.status(201).json({
-      status: "success",
-      message: "Vendor account created successfully",
-      data: {
-        id: newVendor._id,
-        identity: {
-          brandName: newVendor.identity.brandName,
-          email: newVendor.identity.email,
-        },
-      },
-    });
-  } catch (err) {
-    console.error("Vendor signup error:", err);
-    res.status(400).json({
-      status: "fail",
-      message: err.message,
-    });
-  }
-};
-
-exports.signupWhiteLabel = async (req, res) => {
-  try {
-    console.log("WhiteLabel signup request body:", req.body);
-    console.log("Uploaded file:", req.file);
-
-    const {
-      identity,
-      loginData,
-      systemRequirements,
-      additionalServices,
-      paymentData,
-    } = req.body;
-
-    // Parse JSON strings if they come as strings (from FormData)
-    const parsedIdentity =
-      typeof identity === "string" ? JSON.parse(identity) : identity;
-    const parsedLoginData =
-      typeof loginData === "string" ? JSON.parse(loginData) : loginData;
-    const parsedSystemRequirements =
-      typeof systemRequirements === "string"
-        ? JSON.parse(systemRequirements)
-        : systemRequirements;
-    const parsedAdditionalServices =
-      typeof additionalServices === "string"
-        ? JSON.parse(additionalServices)
-        : additionalServices;
-    const parsedPaymentData =
-      typeof paymentData === "string" ? JSON.parse(paymentData) : paymentData;
-
-    // Handle logo upload
-    if (req.file) {
-      const logoPath = getRelativeFilePath(req.file);
-      parsedIdentity.logo = logoPath;
-    }
-
-    // Check if whitelabel already exists
-    const existingWhiteLabel = await WhiteLabel.findOne({
-      $or: [
-        { "loginData.email": parsedLoginData.email },
-        { "identity.arabic_name": parsedIdentity.arabic_name },
-        { "identity.english_name": parsedIdentity.english_name },
-      ],
-    });
-
-    if (existingWhiteLabel) {
-      return res.status(400).json({
-        status: "fail",
-        message: "WhiteLabel with this email or company name already exists",
-      });
-    }
-
-    // Create new whitelabel
-    const newWhiteLabel = await WhiteLabel.create({
-      identity: parsedIdentity,
-      loginData: parsedLoginData,
-      systemRequirements: parsedSystemRequirements,
-      additionalServices: parsedAdditionalServices || [],
-      paymentData: parsedPaymentData,
-    });
-
-    // Just send success message for whitelabel signup
-    res.status(201).json({
-      status: "success",
-      message: "WhiteLabel account created successfully",
-      data: {
-        id: newWhiteLabel._id,
-        identity: {
-          arabic_name: newWhiteLabel.identity.arabic_name,
-          english_name: newWhiteLabel.identity.english_name,
-          logo: newWhiteLabel.identity.logo,
-        },
-        loginData: newWhiteLabel.loginData,
-      },
-    });
-  } catch (err) {
-    console.error("WhiteLabel signup error:", err);
+    console.error("User signup error:", err);
     res.status(400).json({
       status: "fail",
       message: err.message,
@@ -381,15 +86,9 @@ exports.login = catchAsync(async (req, res, next) => {
     });
   }
 
-  // First, search in Host collection
-  let user = await Host.findOne({ email }).select("+password");
-  let userType = "host";
-
-  // If not found in Host, search in Vendor collection
-  if (!user) {
-    user = await Vendor.findOne({ email }).select("+password");
-    userType = "vendor";
-  }
+  // First, search in User collection
+  let user = await User.findOne({ email }).select("+password");
+  let userType = "user";
 
   // If still not found, return error
   if (!user || !(await user.correctPassword(password, user.password))) {
@@ -399,145 +98,7 @@ exports.login = catchAsync(async (req, res, next) => {
     });
   }
 
-  createSendToken(user, 200, res, userType);
-});
-
-exports.sendOTP = catchAsync(async (req, res, next) => {
-  const { phoneNumber, type } = req.body; // type can be "login" or "signup"
-
-  if (!phoneNumber) {
-    return res.status(400).json({
-      status: "fail",
-      message: "Please provide phone number",
-    });
-  }
-
-  if (!type || !["login", "signup"].includes(type)) {
-    return res.status(400).json({
-      status: "fail",
-      message: "Please provide valid purpose (login or signup)",
-    });
-  }
-
-  let user = null;
-  let userType = "signup";
-  let userId = null;
-
-  if (type === "login") {
-    // First, search in Host collection
-    user = await Host.findOne({ phoneNumber });
-    userType = "host";
-
-    // If not found in Host, search in Vendor collection
-    if (!user) {
-      user = await Vendor.findOne({ phoneNumber });
-      userType = "vendor";
-    }
-
-    // If still not found for login, return error
-    if (!user) {
-      return res.status(404).json({
-        status: "fail",
-        message: "No account found with this phone number",
-      });
-    }
-
-    userId = user._id;
-  } else if (type === "signup") {
-    // For signup, check if phone number already exists
-    const existingHost = await Host.findOne({ phoneNumber });
-    const existingVendor = await Vendor.findOne({ phoneNumber });
-
-    if (existingHost || existingVendor) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Phone number already registered. Please use login instead.",
-      });
-    }
-
-    userType = "signup";
-    userId = null;
-  }
-
-  // Generate OTP
-  const otpCode = generateOTP();
-
-  // Delete any existing OTP for this phone number
-  await OTP.deleteMany({ phoneNumber });
-
-  // Save OTP to database
-  await OTP.create({
-    phoneNumber,
-    otpCode,
-    userType,
-    userId,
-  });
-
-  // Send OTP via SMS
-  const smsMessage = `Your OTP code is: ${otpCode}. Valid for 5 minutes.`;
-  await sendSMS(phoneNumber, smsMessage);
-
-  res.status(200).json({
-    status: "success",
-    message: "OTP sent successfully to your phone number",
-    type,
-  });
-});
-
-exports.verifyOTP = catchAsync(async (req, res, next) => {
-  const { phoneNumber, otpCode } = req.body;
-
-  if (!phoneNumber || !otpCode) {
-    return res.status(400).json({
-      status: "fail",
-      message: "Please provide phone number and OTP code",
-    });
-  }
-
-  // Find OTP record
-  const otpRecord = await OTP.findOne({ phoneNumber, otpCode });
-
-  if (!otpRecord) {
-    return res.status(400).json({
-      status: "fail",
-      message: "Invalid or expired OTP",
-    });
-  }
-
-  // Handle signup scenario
-  if (otpRecord.userType === "signup") {
-    // Delete OTP record after successful verification
-    await OTP.deleteOne({ _id: otpRecord._id });
-
-    // Return success for signup phone verification
-    return res.status(200).json({
-      status: "success",
-      message: "Phone number verified successfully",
-      phoneNumber,
-      verified: true,
-    });
-  }
-
-  // Handle login scenario - Find user based on userType and userId from OTP record
-  let user;
-  if (otpRecord.userType === "host") {
-    user = await Host.findById(otpRecord.userId);
-  } else if (otpRecord.userType === "vendor") {
-    user = await Vendor.findById(otpRecord.userId);
-  }
-
-  if (!user) {
-    return res.status(404).json({
-      status: "fail",
-      message: "User not found",
-    });
-  }
-
-  // Delete OTP record after successful verification
-  await OTP.deleteOne({ _id: otpRecord._id });
-
-  // Login the user
-  createSendToken(user, 200, res, otpRecord.userType);
+  createSendToken(user, 200, res);
 });
 
 // EXISTING CONTROLLERS (unchanged)
@@ -558,11 +119,9 @@ exports.isLoggedIn = async (req, res, next) => {
         process.env.JWT_SECRET
       );
 
-      // 2) Check if user still exists (check in both Host and Vendor collections)
-      let currentUser = await Host.findById(decoded.id);
-      if (!currentUser) {
-        currentUser = await Vendor.findById(decoded.id);
-      }
+      // 2) Check if user still exists
+      let currentUser = await User.findById(decoded.id);
+
       if (!currentUser) {
         return next();
       }
@@ -603,11 +162,8 @@ exports.protect = catchAsync(async (req, res, next) => {
 
     const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
-    // Check in both Host and Vendor collections
-    let currentUser = await Host.findById(decoded.id);
-    if (!currentUser) {
-      currentUser = await Vendor.findById(decoded.id);
-    }
+    // Check in User collection
+    let currentUser = await User.findById(decoded.id);
 
     if (!currentUser) {
       return res.status(401).json({
@@ -648,11 +204,8 @@ exports.restrictTo =
 
 exports.forgotPassword = async (req, res) => {
   try {
-    // Check in both Host and Vendor collections
-    let user = await Host.findOne({ email: req.body.email });
-    if (!user) {
-      user = await Vendor.findOne({ email: req.body.email });
-    }
+    // Check in User collection
+    let user = await User.findOne({ email: req.body.email });
 
     if (!user) {
       return res.status(404).json({
@@ -665,7 +218,7 @@ exports.forgotPassword = async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     // Use frontend URL instead of backend URL
-    const resetURL = `${process.env.FRONTEND_URL}/changePassword?token=${resetToken}`;
+    const resetURL = `${process.env.FRONTEND_URL}/change-password?token=${resetToken}`;
 
     try {
       await sendEmail({
@@ -709,16 +262,16 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
     console.log("Attempting to reset password with token:", req.params.token);
     console.log("Hashed token:", hashedToken);
 
-    // Check in both Host and Vendor collections
-    let user = await Host.findOne({
+    // Check in User collection
+    let user = await User.findOne({
       passwordResetToken: hashedToken,
       passwordResetExpires: { $gt: Date.now() },
     });
 
     if (!user) {
-      user = await Vendor.findOne({
-        passwordResetToken: hashedToken,
-        passwordResetExpires: { $gt: Date.now() },
+      return res.status(400).json({
+        status: "fail",
+        message: "Token is invalid or has expired",
       });
     }
 
@@ -738,13 +291,10 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
     await user.save();
 
     // Determine user type for token response
-    let userType = "host";
-    if (user.constructor.modelName === "Vendor") {
-      userType = "vendor";
-    }
+    let userType = "user";
 
     // Log the user in, send JWT
-    createSendToken(user, 200, res, userType);
+    createSendToken(user, 200, res);
   } catch (err) {
     console.error("Reset password error:", err);
     res.status(400).json({
@@ -756,14 +306,9 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
 
 exports.updatePassword = catchAsync(async (req, res, next) => {
   try {
-    // Check in both Host and Vendor collections
-    let user = await Host.findById(req.user.id).select("+password");
-    let userType = "host";
-
-    if (!user) {
-      user = await Vendor.findById(req.user.id).select("+password");
-      userType = "vendor";
-    }
+    // Check in User collection
+    let user = await User.findById(req.user.id).select("+password");
+    let userType = "user";
 
     if (!user) {
       return res.status(404).json({
@@ -785,7 +330,7 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
     user.passwordConfirm = req.body.passwordConfirm;
     await user.save();
 
-    createSendToken(user, 200, res, userType);
+    createSendToken(user, 200, res);
   } catch (err) {
     res.status(400).json({
       status: "fail",
@@ -795,11 +340,8 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
 });
 
 exports.adminProtection = catchAsync(async (req, res, next) => {
-  // Check in both Host and Vendor collections
-  let user = await Host.findById(req.params.id);
-  if (!user) {
-    user = await Vendor.findById(req.params.id);
-  }
+  // Check in User collection
+  let user = await User.findById(req.params.id);
 
   if (user && user.role === "Admin") {
     return next(new AppError(`admin acc can't be changed`, 401));
@@ -808,11 +350,8 @@ exports.adminProtection = catchAsync(async (req, res, next) => {
 });
 
 exports.updateUser = catchAsync(async (req, res, next) => {
-  // Check in both Host and Vendor collections
-  let user = await Host.findById(req.params.id);
-  if (!user) {
-    user = await Vendor.findById(req.params.id);
-  }
+  // Check in User collection
+  let user = await User.findById(req.params.id);
 
   if (!user) {
     return next(new AppError(`there isn't a user with that id`, 404));

@@ -2,27 +2,23 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 
-const hostSchema = new mongoose.Schema(
+const userSchema = new mongoose.Schema(
   {
     username: {
       type: String,
-      // required: [true, "Please provide a username"],
+      required: [true, "Please provide a username"],
       trim: true,
     },
     email: {
       type: String,
-      // required: [true, "Please provide an email"],
+      required: [true, "Please provide an email"],
       sparse: true,
       unique: true,
       lowercase: true,
     },
-    phoneNumber: {
-      type: String,
-      required: [true, "Please provide a phone number"],
-    },
     password: {
       type: String,
-      // required: [true, "Please provide a password"],
+      required: [true, "Please provide a password"],
       minlength: 8,
       select: false,
     },
@@ -30,28 +26,29 @@ const hostSchema = new mongoose.Schema(
       type: String,
       minlength: 8,
 
-      // required: [true, "Please confirm your password"],
-      // validate: {
-      //   validator: function (el) {
-      //     return el === this.password;
-      //   },
-      //   message: "Passwords are not the same",
-      // },
+      required: [true, "Please confirm your password"],
+      validate: {
+        validator: function (el) {
+          return el === this.password;
+        },
+        message: "Passwords are not the same",
+      },
+    },
+    role: {
+      type: String,
+      enum: ["customer", "engineer", "admin"],
+      default: "customer",
     },
     passwordChangedAt: Date,
     passwordResetToken: String,
     passwordResetExpires: Date,
-    profileCompleted: {
-      type: Boolean,
-      default: false,
-    },
   },
   {
     timestamps: true,
   }
 );
 
-hostSchema.pre("save", async function (next) {
+userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
 
   this.password = await bcrypt.hash(this.password, 12);
@@ -59,21 +56,21 @@ hostSchema.pre("save", async function (next) {
   next();
 });
 
-hostSchema.pre("save", function (next) {
+userSchema.pre("save", function (next) {
   if (!this.isModified("password") || this.isNew) return next();
 
   this.passwordChangedAt = Date.now() - 1000;
   next();
 });
 
-hostSchema.methods.correctPassword = async function (
+userSchema.methods.correctPassword = async function (
   candidatePassword,
   userPassword
 ) {
   return await bcrypt.compare(candidatePassword, userPassword);
 };
 
-hostSchema.methods.changedPasswordAfter = function (JWTTimestamp) {
+userSchema.methods.changedPasswordAfter = function (JWTTimestamp) {
   if (this.passwordChangedAt) {
     const changedTimestamp = parseInt(
       this.passwordChangedAt.getTime() / 1000,
@@ -84,7 +81,7 @@ hostSchema.methods.changedPasswordAfter = function (JWTTimestamp) {
   return false;
 };
 
-hostSchema.methods.createPasswordResetToken = function () {
+userSchema.methods.createPasswordResetToken = function () {
   const resetToken = crypto.randomBytes(32).toString("hex");
 
   this.passwordResetToken = crypto
@@ -97,6 +94,6 @@ hostSchema.methods.createPasswordResetToken = function () {
   return resetToken;
 };
 
-const Host = mongoose.model("Host", hostSchema);
+const User = mongoose.model("User", userSchema);
 
-module.exports = Host;
+module.exports = User;
