@@ -304,6 +304,30 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
   }
 });
 
+exports.getMe = catchAsync(async (req, res, next) => {
+  try {
+    // Get user from the protect middleware
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        status: "fail",
+        message: "User not found",
+      });
+    }
+
+    res.status(200).json({
+      status: "success",
+      user,
+    });
+  } catch (err) {
+    res.status(400).json({
+      status: "fail",
+      message: err.message,
+    });
+  }
+});
+
 exports.updatePassword = catchAsync(async (req, res, next) => {
   try {
     // Check in User collection
@@ -349,25 +373,54 @@ exports.adminProtection = catchAsync(async (req, res, next) => {
   next();
 });
 
-exports.updateUser = catchAsync(async (req, res, next) => {
-  // Check in User collection
-  let user = await User.findById(req.params.id);
+exports.updateMe = catchAsync(async (req, res, next) => {
+  try {
+    // 1) Create error if user POSTs password data
+    if (req.body.password || req.body.passwordConfirm) {
+      return res.status(400).json({
+        status: "fail",
+        message:
+          "This route is not for password updates. Please use /updateMyPassword.",
+      });
+    }
 
-  if (!user) {
-    return next(new AppError(`there isn't a user with that id`, 404));
-  }
+    // 2) Filter out unwanted fields that are not allowed to be updated
+    const filteredBody = {};
+    const allowedFields = ["username", "phoneNumber", "location"];
 
-  const { role, name } = req.body;
-  user.role = role;
-  user.name = name;
-  if (req.body.password) {
-    user.password = req.body.password;
+    Object.keys(req.body).forEach((key) => {
+      if (allowedFields.includes(key)) {
+        filteredBody[key] = req.body[key];
+      }
+    });
+
+    // 3) Update user document
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user.id,
+      filteredBody,
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        status: "fail",
+        message: "User not found",
+      });
+    }
+
+    res.status(200).json({
+      status: "success",
+      message: "Profile updated successfully",
+      user: updatedUser,
+    });
+  } catch (err) {
+    console.error("Update profile error:", err);
+    res.status(400).json({
+      status: "fail",
+      message: err.message,
+    });
   }
-  user.save();
-  res.status(201).json({
-    status: "success",
-    data: {
-      data: user,
-    },
-  });
 });

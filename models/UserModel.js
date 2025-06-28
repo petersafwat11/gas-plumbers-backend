@@ -8,25 +8,30 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, "Please provide a username"],
       trim: true,
+      minlength: [1, "Username cannot be empty"],
     },
     email: {
       type: String,
       required: [true, "Please provide an email"],
-      sparse: true,
       unique: true,
       lowercase: true,
+      validate: {
+        validator: function (email) {
+          return /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(email);
+        },
+        message: "Please provide a valid email",
+      },
     },
     password: {
       type: String,
       required: [true, "Please provide a password"],
-      minlength: 8,
+      minlength: [8, "Password must be at least 8 characters"],
       select: false,
     },
     passwordConfirm: {
       type: String,
-      minlength: 8,
-
       required: [true, "Please confirm your password"],
+      minlength: [8, "Password confirmation must be at least 8 characters"],
       validate: {
         validator: function (el) {
           return el === this.password;
@@ -36,8 +41,54 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["customer", "engineer", "admin"],
+      enum: {
+        values: ["customer", "engineer", "admin"],
+        message: "Role must be either customer, engineer, or admin",
+      },
       default: "customer",
+    },
+    phoneNumber: {
+      type: String,
+      required: [true, "Please provide a phone number"],
+      validate: {
+        validator: function (phone) {
+          // UK phone number validation
+          return /^(\+44\s?|0)[0-9\s\-]{9,}$/.test(phone);
+        },
+        message: "Please provide a valid UK phone number",
+      },
+    },
+    location: {
+      address: {
+        type: String,
+        required: [true, "Please provide an address"],
+        trim: true,
+        minlength: [1, "Address cannot be empty"],
+      },
+      city: {
+        type: String,
+        required: [true, "Please provide a city"],
+        trim: true,
+        minlength: [1, "City cannot be empty"],
+      },
+      zipCode: {
+        type: String,
+        required: [true, "Please provide a postcode"],
+        trim: true,
+        validate: {
+          validator: function (zipCode) {
+            // UK postcode validation
+            return /^[A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2}$/i.test(zipCode);
+          },
+          message: "Please provide a valid UK postcode",
+        },
+      },
+      country: {
+        type: String,
+        required: [true, "Please provide a country"],
+        default: "United Kingdom",
+        trim: true,
+      },
     },
     passwordChangedAt: Date,
     passwordResetToken: String,
@@ -47,6 +98,10 @@ const userSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Index for better performance
+userSchema.index({ email: 1 });
+userSchema.index({ username: 1 });
 
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
